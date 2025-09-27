@@ -8,14 +8,15 @@ from datetime import datetime
 from typing import Optional
 import re
 
-# Import the generic parser
+# Import the parsers
 from parser.generic_1120s_parser import GenericForm1120SParser
+from parser.pl_parser import PLStatementParser
 
 
 app = FastAPI(
-    title="Generic Form 1120-S Parser API",
-    description="Parse any IRS Form 1120-S (S Corporation Tax Return) and extract key financial data",
-    version="2.0.0"
+    title="Tax Document Parser API",
+    description="Parse IRS Form 1120-S (S Corporation Tax Return) and P&L Statements to extract key financial data",
+    version="3.0.0"
 )
 
 # Add CORS middleware for web access
@@ -95,6 +96,61 @@ async def parse_form_1120s(
             "status": "success",
             "data": result
         })
+    
+    finally:
+        if os.path.exists(temp_pdf_path):
+            os.unlink(temp_pdf_path)
+
+@app.post("/parse-pl")
+async def parse_pl_statement(
+    file: UploadFile = File(...)
+):
+    """Parse P&L Statement using flexible pattern matching - returns JSON"""
+    
+    # Validate file type
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+    
+    # Save uploaded file temporarily
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+        content = await file.read()
+        temp_file.write(content)
+        temp_pdf_path = temp_file.name
+    
+    try:
+        # Use P&L parser
+        parser = PLStatementParser()
+        
+        # Parse the P&L statement
+        result = parser.parse(temp_pdf_path)
+        
+        # Ensure numeric values are properly formatted for JSON
+        def ensure_numeric(value):
+            if value is None or value == '':
+                return None
+            if isinstance(value, (int, float)):
+                return value
+            return None
+        
+        # Format the result for API response
+        formatted_result = {
+            "header": result.get("header", {}),
+            "revenue": ensure_numeric(result.get("revenue")),
+            "net_income": ensure_numeric(result.get("net_income")),
+            "total_expenses": ensure_numeric(result.get("total_expenses")),
+            "depreciation": ensure_numeric(result.get("depreciation")),
+            "interest": ensure_numeric(result.get("interest")),
+            "amortization": ensure_numeric(result.get("amortization"))
+        }
+        
+        return JSONResponse(content={
+            "status": "success",
+            "document_type": "P&L Statement",
+            "data": formatted_result
+        })
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error parsing P&L statement: {str(e)}")
     
     finally:
         if os.path.exists(temp_pdf_path):
@@ -245,6 +301,7 @@ async def root():
         "documentation": "/docs",
         "endpoints": {
             "/parse-1120s": "POST - Parse Form 1120-S and return JSON",
+            "/parse-pl": "POST - Parse P&L Statement and return JSON",
             "/validate-1120s": "POST - Validate and check extractable fields",
             "/supported-fields": "GET - List all supported fields",
             "/health": "GET - Service health check"
