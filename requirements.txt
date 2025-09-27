@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pdfplumber
+pandas
+python-multipart
+xmlschema
+requests
+pydantic
